@@ -1,0 +1,15 @@
+{
+  "name": "reaction-game",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Reflex Run — reaction time trainer",
+  "scripts": {
+    "start": "serve -s . -l tcp://0.0.0.0:${PORT:-3000}"
+  },
+  "dependencies": {
+    "serve": "^14.2.4"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -87,3 +87,13 @@ Open `game.js` and edit `stageParams()` to change the number of targets per stag
 ## Browser support
 
 Any current Chrome, Edge, Firefox or Safari (desktop and mobile). The game uses Pointer Events, CSS custom properties, `localStorage` and (optionally) the Web Audio API. If `localStorage` is unavailable (for example in some private modes), the game still works but won't save best scores.
+
+## Deploy
+
+This repo includes a `package.json` and `railway.json` so Railway can serve the static site with `serve` on `$PORT`.
+
+```bash
+npm install
+npm start
+```
+
