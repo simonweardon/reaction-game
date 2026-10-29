@@ -3,36 +3,42 @@
 
   // ---------- Configuration ----------
 
-  const LIVES = 3;
+  const LIVES = 5;
+  const REGEN_EVERY = 3; // consecutive zero-miss levels that earn back one life (capped at LIVES)
   const BANNER_MS = 750;
   const DEATH_PAUSE_MS = 650; // let the final miss register visually before the end screen
   const HIT_SLOP_PX = 8; // forgiveness around the target edge for fingers
   const MIN_JUMP = 0.28; // min normalized distance between consecutive targets
-  const STORAGE_KEY = 'reflex-run:best:v2';
+  const STORAGE_KEY = 'reflex-run:best:v3';
   const SOUND_KEY = 'reflex-run:sound:v1';
 
-  // Level 1 baseline and per-level decay. Each level multiplies by the decay, down to the floor.
+  // Logarithmic ramp: value = max(FLOOR, BASE - K * ln(1 + (level - 1))), so level 1 is exactly BASE.
+  // Tuned (Monte Carlo of a skilled player) so floors land around 9-10 minutes in and a good run
+  // lasts ~10 minutes: delays floor near level 176-179, lifetime near 189, size near 209.
   const BASE = { delayMin: 250, delayMax: 450, lifetime: 900, size: 70 };
-  const DECAY = { delay: 0.89, lifetime: 0.9, size: 0.94 };
-  const FLOOR = { delayMin: 80, delayMax: 140, lifetime: 320, size: 36 };
+  const K = { delayMin: 31, delayMax: 56, lifetime: 107, size: 6 };
+  const FLOOR = { delayMin: 90, delayMax: 160, lifetime: 340, size: 38 };
   const BASE_CYCLE = BASE.lifetime + (BASE.delayMin + BASE.delayMax) / 2;
 
   const rand = (min, max) => min + Math.random() * (max - min);
   const randInt = (min, max) => Math.floor(rand(min, max + 1));
 
-  /** Difficulty for a 1-based level: exponential decay toward humane-but-brutal floors. */
+  /** Difficulty for a 1-based level: slow logarithmic ramp toward humane-but-brutal floors. */
   function levelParams(level) {
     const n = level - 1;
-    const delayMin = Math.max(FLOOR.delayMin, BASE.delayMin * DECAY.delay ** n);
-    const delayMax = Math.max(FLOOR.delayMax, BASE.delayMax * DECAY.delay ** n);
-    const lifetime = Math.max(FLOOR.lifetime, BASE.lifetime * DECAY.lifetime ** n);
-    const size = Math.max(FLOOR.size, BASE.size * DECAY.size ** n);
+    const ramp = Math.log(1 + n);
+    const at = (key) => Math.max(FLOOR[key], BASE[key] - K[key] * ramp);
+    const delayMin = at('delayMin');
+    const delayMax = at('delayMax');
+    const lifetime = at('lifetime');
+    const size = at('size');
     return {
       delayMin,
       delayMax,
       lifetime,
       size,
-      multiplier: 1 + n * 0.2,
+      // Keeps growing after the floors, so late levels are always worth more.
+      multiplier: 1 + n * 0.05,
       // How much faster one appear→expire cycle is compared with level 1.
       speed: BASE_CYCLE / (lifetime + (delayMin + delayMax) / 2),
     };
@@ -77,18 +83,27 @@
     return 'slow';
   }
 
-  function ratingFor(level, hits) {
+  /** Rated by survival time — a good run is designed to last about 10 minutes. */
+  function ratingFor(ms, hits) {
     if (!hits) return 'No hits — give it another go';
-    if (level >= 15) return 'Inhuman 🔥';
-    if (level >= 11) return 'Lightning reflexes ⚡';
-    if (level >= 8) return 'Razor sharp';
-    if (level >= 5) return 'Quick hands';
-    if (level >= 3) return 'Solid';
+    const min = ms / 60000;
+    if (min >= 12) return 'Legendary 👑';
+    if (min >= 10) return 'Inhuman 🔥';
+    if (min >= 8) return 'Lightning reflexes ⚡';
+    if (min >= 5) return 'Razor sharp';
+    if (min >= 3) return 'Quick hands';
+    if (min >= 1) return 'Solid';
     return 'Warming up';
   }
 
   const fmtMs = (ms) => `${Math.round(ms)} ms`;
-  const fmtSec = (ms) => `${(ms / 1000).toFixed(2)}s`;
+  /** m:ss.t — run clock and survival times. */
+  const fmtClock = (ms) => {
+    const tenths = Math.floor(Math.max(0, ms) / 100);
+    const m = Math.floor(tenths / 600);
+    const s = Math.floor(tenths / 10) % 60;
+    return `${m}:${String(s).padStart(2, '0')}.${tenths % 10}`;
+  };
   const fmtInt = (n) => Math.round(n).toLocaleString();
 
   // ---------- Storage ----------
@@ -122,6 +137,7 @@
       const data = JSON.parse(storageGet(STORAGE_KEY) || 'null');
       if (data && typeof data === 'object') {
         return {
+          time: Number.isFinite(data.time) ? data.time : null,
           level: Number.isFinite(data.level) ? data.level : null,
           score: Number.isFinite(data.score) ? data.score : null,
           runs: Number.isFinite(data.runs) ? data.runs : 0,
@@ -130,7 +146,7 @@
     } catch {
       /* corrupted entry — fall through to defaults */
     }
-    return { level: null, score: null, runs: 0 };
+    return { time: null, level: null, score: null, runs: 0 };
   }
 
   function saveBest(best) {
@@ -175,6 +191,10 @@
     go: () => beep(880, 0.16, 'square', 0.07),
     hit: (cls) => beep(cls === 'great' ? 1320 : cls === 'good' ? 1100 : 900, 0.07, 'triangle', 0.14),
     miss: () => beep(160, 0.14, 'sawtooth', 0.08),
+    life: () => {
+      beep(990, 0.08, 'sine', 0.1);
+      setTimeout(() => beep(1480, 0.14, 'sine', 0.1), 80);
+    },
     stage: () => {
       beep(660, 0.08, 'triangle', 0.1);
       setTimeout(() => beep(990, 0.12, 'triangle', 0.1), 90);
@@ -208,6 +228,7 @@
   };
 
   const el = {
+    bestTime: $('best-time'),
     bestLevel: $('best-level'),
     bestScore: $('best-score'),
     btnPlay: $('btn-play'),
@@ -235,6 +256,8 @@
     stageSub: $('stage-sub'),
     newBest: $('new-best'),
     endTitle: $('end-title'),
+    endTime: $('end-time'),
+    endTimeWrap: $('end-time-wrap'),
     endLevel: $('end-level'),
     endLevelWrap: $('end-level-wrap'),
     endScore: $('end-score'),
@@ -270,6 +293,7 @@
   let levelTargets = []; // the current level's random batch
   let cursor = 0; // index into levelTargets
   let lives = LIVES;
+  let cleanStreak = 0; // consecutive levels cleared with zero misses
   let current = null; // { cx, cy, r, def }
   let appearAt = 0;
   let runStart = 0;
@@ -289,6 +313,7 @@
       missEarly: 0,
       missTimeout: 0,
       score: 0,
+      regained: 0,
       perLevel: [], // index level-1 → { reactions: [], misses: 0 }
     };
   }
@@ -326,6 +351,7 @@
     levelTargets = generateLevel(level, null);
     cursor = 0;
     lives = LIVES;
+    cleanStreak = 0;
     current = null;
     stats = newStats();
     levelStats(level);
@@ -335,7 +361,7 @@
     el.hudLast.textContent = '—';
     el.hudLast.className = 'hud-value';
     updateHud();
-    el.hudTime.textContent = '0.00';
+    el.hudTime.textContent = fmtClock(0);
     showScreen('game');
     runCountdown();
   }
@@ -367,20 +393,22 @@
   function startClock() {
     const tick = () => {
       if (!isPlaying()) return;
-      el.hudTime.textContent = ((performance.now() - runStart) / 1000).toFixed(2);
+      el.hudTime.textContent = fmtClock(performance.now() - runStart);
       rafId = requestAnimationFrame(tick);
     };
     rafId = requestAnimationFrame(tick);
   }
 
-  function showLevelBanner() {
+  function showLevelBanner(regained) {
     state = 'banner';
     const p = levelParams(level);
     el.stageTitle.textContent = `Level ${level}`;
-    el.stageSub.textContent = `${p.speed.toFixed(1)}× speed · ${levelTargets.length} targets`;
+    el.stageSub.textContent =
+      `${p.speed.toFixed(1)}× speed · ${levelTargets.length} targets` + (regained ? ' · +1 ♥' : '');
     el.stageOverlay.hidden = false;
     retrigger(el.stageTitle, 'pop');
-    sfx.stage();
+    if (regained) sfx.life();
+    else sfx.stage();
     stepTimer = setTimeout(() => {
       el.stageOverlay.hidden = true;
       scheduleNext();
@@ -507,7 +535,7 @@
     hideTarget();
     current = null;
     state = 'dying';
-    el.hudTime.textContent = ((runEnd - runStart) / 1000).toFixed(2);
+    el.hudTime.textContent = fmtClock(runEnd - runStart);
     stepTimer = setTimeout(finish, DEATH_PAUSE_MS);
   }
 
@@ -515,16 +543,29 @@
     current = null;
     cursor++;
     if (cursor >= levelTargets.length) {
+      const regained = completeLevel();
       const last = levelTargets[levelTargets.length - 1];
       level++;
       levelTargets = generateLevel(level, last);
       cursor = 0;
       levelStats(level);
       updateHud();
-      showLevelBanner();
+      if (regained) retrigger(el.hudLivesWrap, 'gain');
+      showLevelBanner(regained);
     } else {
       scheduleNext();
     }
+  }
+
+  /** Tracks clean levels; every REGEN_EVERY in a row earns a life back. Returns true if one was regained. */
+  function completeLevel() {
+    cleanStreak = levelStats(level).misses ? 0 : cleanStreak + 1;
+    if (cleanStreak < REGEN_EVERY) return false;
+    cleanStreak = 0;
+    if (lives >= LIVES) return false;
+    lives++;
+    stats.regained++;
+    return true;
   }
 
   function spawnFx(className, x, y, opts = {}) {
@@ -572,9 +613,11 @@
     const score = stats.score;
 
     const best = loadBest();
+    const isBestTime = hits > 0 && (best.time === null || total > best.time);
     const isBestLevel = hits > 0 && (best.level === null || level > best.level);
     const isBestScore = hits > 0 && (best.score === null || score > best.score);
     const updated = {
+      time: isBestTime ? total : best.time,
       level: isBestLevel ? level : best.level,
       score: isBestScore ? score : best.score,
       runs: best.runs + 1,
@@ -582,25 +625,33 @@
     saveBest(updated);
     renderBest(updated);
 
-    if (isBestLevel || isBestScore || level >= 10) sfx.finish();
+    const records = [isBestTime && 'time', isBestLevel && 'level', isBestScore && 'score'].filter(Boolean);
+    const minutes = total / 60000;
+    if (records.length || minutes >= 5) sfx.finish();
     else sfx.over();
 
-    el.endTitle.textContent = level >= 15 ? 'Unstoppable!' : level >= 10 ? 'Huge run!' : 'Game over';
+    el.endTitle.textContent = minutes >= 10 ? 'Unstoppable!' : minutes >= 5 ? 'Huge run!' : 'Game over';
+    el.endTime.textContent = fmtClock(total);
     el.endLevel.textContent = String(level);
     el.endScore.textContent = fmtInt(score);
+    el.endTimeWrap.classList.toggle('is-best', isBestTime);
     el.endLevelWrap.classList.toggle('is-best', isBestLevel);
     el.endScoreWrap.classList.toggle('is-best', isBestScore);
-    el.endRating.textContent = `${ratingFor(level, hits)} · ${levelParams(level).speed.toFixed(1)}× speed`;
-    el.newBest.hidden = !(isBestLevel || isBestScore);
+    el.endRating.textContent = `${ratingFor(total, hits)} · ${levelParams(level).speed.toFixed(1)}× speed`;
+    el.newBest.hidden = !records.length;
     el.newBest.textContent =
-      isBestLevel && isBestScore ? 'New best level & score!' : isBestLevel ? 'New best level!' : 'New best score!';
+      records.length === 3
+        ? 'New best time, level & score!'
+        : `New best ${records.join(' & ')}!`;
 
-    el.endTotal.textContent = fmtSec(total);
+    el.endTotal.textContent = fmtClock(total);
     el.endAvg.textContent = hits ? fmtMs(avg) : '—';
     el.endFastest.textContent = hits ? fmtMs(fastest) : '—';
     el.endHits.textContent = String(hits);
     el.endMisses.textContent = String(misses);
-    el.endMissBreakdown.textContent = `${stats.missEmpty} off-target · ${stats.missEarly} early · ${stats.missTimeout} slow`;
+    el.endMissBreakdown.textContent =
+      `${stats.missEmpty} off-target · ${stats.missEarly} early · ${stats.missTimeout} slow` +
+      (stats.regained ? ` · ${stats.regained} ♥ regained` : '');
     el.endAccuracy.textContent = `${accuracy.toFixed(1)}%`;
 
     el.endStages.replaceChildren(
@@ -648,7 +699,8 @@
   // ---------- Menu ----------
 
   function renderBest(best) {
-    el.bestLevel.textContent = best.level === null ? '—' : `Level ${best.level}`;
+    el.bestTime.textContent = best.time === null ? '—' : fmtClock(best.time);
+    el.bestLevel.textContent = best.level === null ? '—' : String(best.level);
     el.bestScore.textContent = best.score === null ? '—' : fmtInt(best.score);
   }
 
@@ -678,7 +730,7 @@
   });
 
   el.btnReset.addEventListener('click', () => {
-    if (window.confirm('Reset your best level and best score?')) {
+    if (window.confirm('Reset your best time, level and score?')) {
       storageRemove(STORAGE_KEY);
       renderBest(loadBest());
     }

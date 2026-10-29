@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0a0c13" />
-  <meta name="description" content="Reflex Run — a fast-paced reaction-time trainer. Endless levels of randomly placed targets that get faster and smaller every level. Three lives." />
+  <meta name="description" content="Reflex Run — a fast-paced reaction-time trainer. Endless levels of randomly placed targets that get faster and smaller every level. Five lives, regained by clean play. A great run lasts about ten minutes." />
   <title>Reflex Run — Reaction Time Trainer</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%230a0c13' stroke='%235eead4' stroke-width='6'/%3E%3Ccircle cx='32' cy='32' r='12' fill='%235eead4'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="style.css" />
@@ -17,11 +17,15 @@
         <div class="logo"><span class="logo-dot"></span>REFLEX RUN</div>
         <h1 id="start-title">How fast are your hands?</h1>
         <p class="sub">
-          Tap each target the instant it appears. Endless levels, three lives — every level is
-          faster, tighter and smaller than the last.
+          Tap each target the instant it appears. Endless levels, five lives — every level is
+          a little faster, tighter and smaller than the last. A great run lasts about ten minutes.
         </p>
 
         <div class="best-grid">
+          <div class="stat">
+            <span class="stat-label">Best time</span>
+            <span class="stat-value" id="best-time">—</span>
+          </div>
           <div class="stat">
             <span class="stat-label">Best level</span>
             <span class="stat-value" id="best-level">—</span>
@@ -38,7 +42,8 @@
           <li><span class="rule-dot hit"></span>Tap the glowing target before its ring closes.</li>
           <li><span class="rule-dot miss"></span>Tapping empty space or tapping too early is a miss.</li>
           <li><span class="rule-dot slow"></span>Let a target expire and it counts as a miss too.</li>
-          <li><span class="rule-dot life"></span>Every miss costs one of your 3 lives. Lose them all and the run ends.</li>
+          <li><span class="rule-dot life"></span>Every miss costs one of your 5 lives. Lose them all and the run ends.</li>
+          <li><span class="rule-dot life"></span>Clear 3 levels in a row without a miss to win a life back (up to 5).</li>
         </ul>
 
         <div class="row small-row">
@@ -61,7 +66,7 @@
         </div>
         <div class="hud-item" id="hud-lives-wrap">
           <span class="hud-label">Lives</span>
-          <span class="hud-value lives" id="hud-lives" role="img" aria-label="3 of 3 lives left"></span>
+          <span class="hud-value lives" id="hud-lives" role="img" aria-label="5 of 5 lives left"></span>
         </div>
         <div class="hud-item">
           <span class="hud-label">Last</span>
@@ -73,7 +78,7 @@
         </div>
         <div class="hud-item">
           <span class="hud-label">Time</span>
-          <span class="hud-value mono" id="hud-time">0.00</span>
+          <span class="hud-value mono" id="hud-time">0:00.0</span>
         </div>
         <button id="btn-quit" class="btn-quit" type="button" aria-label="Quit to menu" title="Quit (Esc)">&times;</button>
         <div class="progress" aria-hidden="true"><div class="progress-bar" id="progress-bar"></div></div>
@@ -106,6 +111,10 @@
 
         <div class="score-big">
           <div class="score-pair">
+            <div class="score-block" id="end-time-wrap">
+              <span class="stat-label">Survived</span>
+              <span id="end-time" class="score-value">0:00.0</span>
+            </div>
             <div class="score-block" id="end-level-wrap">
               <span class="stat-label">Level reached</span>
               <span id="end-level" class="score-value">1</span>

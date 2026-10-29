@@ -155,7 +155,7 @@ h2 {
 }
 
 .best-grid {
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
 }
 
 .stats-grid {
@@ -165,6 +165,10 @@ h2 {
 @media (max-width: 480px) {
   .stats-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .best-grid .stat-value {
+    font-size: 1.1rem;
   }
 }
 
@@ -350,7 +354,8 @@ h2 {
 
 .lives {
   display: inline-flex;
-  gap: 2px;
+  gap: 1px;
+  font-size: 0.95em;
   letter-spacing: 0;
 }
 
@@ -368,6 +373,16 @@ h2 {
 
 #hud-lives-wrap.bump .hud-value {
   animation: bump 0.25s ease-out;
+}
+
+#hud-lives-wrap.gain .hud-value {
+  animation: gain 0.45s ease-out;
+}
+
+@keyframes gain {
+  0% { transform: scale(1); filter: brightness(1); }
+  40% { transform: scale(1.3); filter: brightness(1.8); }
+  100% { transform: scale(1); filter: brightness(1); }
 }
 
 @keyframes bump {
@@ -708,7 +723,7 @@ h2 {
 }
 
 .score-value {
-  font-size: clamp(3rem, 14vw, 4.2rem);
+  font-size: clamp(1.7rem, 8.5vw, 3.2rem);
   font-weight: 900;
   line-height: 1.05;
   font-variant-numeric: tabular-nums;
@@ -727,6 +742,7 @@ h2 {
 
 .score-block {
   flex: 1;
+  min-width: 0;
   max-width: 240px;
   display: flex;
   flex-direction: column;
