@@ -294,6 +294,7 @@ h2 {
 .rule-dot.hit { background: var(--hit); box-shadow: 0 0 8px var(--hit); }
 .rule-dot.miss { background: var(--miss); box-shadow: 0 0 8px var(--miss); }
 .rule-dot.slow { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+.rule-dot.life { background: #f472b6; box-shadow: 0 0 8px #f472b6; }
 
 /* ---------- Game ---------- */
 
@@ -345,10 +346,28 @@ h2 {
 .hud-value.good { color: var(--accent); }
 .hud-value.ok { color: var(--warn); }
 .hud-value.slow { color: var(--miss); }
+.hud-value.accent { color: var(--accent); }
 
-#hud-misses-wrap.bump .hud-value {
+.lives {
+  display: inline-flex;
+  gap: 2px;
+  letter-spacing: 0;
+}
+
+.heart {
+  color: #f472b6;
+  text-shadow: 0 0 8px rgba(244, 114, 182, 0.6);
+  transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+.heart.lost {
+  color: var(--muted);
+  text-shadow: none;
+  opacity: 0.3;
+}
+
+#hud-lives-wrap.bump .hud-value {
   animation: bump 0.25s ease-out;
-  color: var(--miss);
 }
 
 @keyframes bump {
@@ -393,8 +412,21 @@ h2 {
   transition: width 0.2s ease-out;
 }
 
+/* Phones: two rows of three, quit button on the right spanning both rows. */
+@media (max-width: 520px) {
+  .hud {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr) auto;
+    row-gap: 4px;
+  }
+
+  .btn-quit {
+    grid-column: 4;
+    grid-row: 1 / span 2;
+  }
+}
+
 @media (max-width: 420px) {
-  .hide-xs { display: none; }
   .hud-value { font-size: 0.95rem; }
   .hud-label { font-size: 0.56rem; letter-spacing: 0.08em; }
 }
@@ -686,7 +718,40 @@ h2 {
   color: transparent;
 }
 
+.score-pair {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.score-block {
+  flex: 1;
+  max-width: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 6px;
+  border-radius: 16px;
+  border: 1px solid transparent;
+}
+
+.score-block.is-best {
+  border-color: rgba(251, 191, 36, 0.45);
+  background: rgba(251, 191, 36, 0.06);
+  box-shadow: 0 0 28px rgba(251, 191, 36, 0.15);
+}
+
+.score-block.is-best .stat-label {
+  color: var(--warn);
+}
+
+.score-block.is-best .stat-label::after {
+  content: " ★";
+}
+
 .rating {
+  margin-top: 6px;
   color: var(--muted);
   font-weight: 600;
 }
@@ -714,7 +779,7 @@ h2 {
 
 .stage-table {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
   gap: 6px;
   margin-bottom: 20px;
 }

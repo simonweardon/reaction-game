@@ -3,65 +3,71 @@
 
   // ---------- Configuration ----------
 
-  const STAGES = 5;
-  const BANNER_MS = 1100;
+  const LIVES = 3;
+  const BANNER_MS = 750;
+  const DEATH_PAUSE_MS = 650; // let the final miss register visually before the end screen
   const HIT_SLOP_PX = 8; // forgiveness around the target edge for fingers
   const MIN_JUMP = 0.28; // min normalized distance between consecutive targets
-  const STORAGE_KEY = 'reflex-run:best:v1';
+  const STORAGE_KEY = 'reflex-run:best:v2';
   const SOUND_KEY = 'reflex-run:sound:v1';
 
-  const lerp = (a, b, t) => a + (b - a) * t;
-  const rand = (min, max) => min + Math.random() * (max - min);
+  // Level 1 baseline and per-level decay. Each level multiplies by the decay, down to the floor.
+  const BASE = { delayMin: 250, delayMax: 450, lifetime: 900, size: 70 };
+  const DECAY = { delay: 0.89, lifetime: 0.9, size: 0.94 };
+  const FLOOR = { delayMin: 80, delayMax: 140, lifetime: 320, size: 36 };
+  const BASE_CYCLE = BASE.lifetime + (BASE.delayMin + BASE.delayMax) / 2;
 
-  /** Difficulty curve: every stage has more targets, shorter gaps, shorter lifetimes, smaller targets. */
-  function stageParams(stage) {
-    const t = stage / (STAGES - 1);
+  const rand = (min, max) => min + Math.random() * (max - min);
+  const randInt = (min, max) => Math.floor(rand(min, max + 1));
+
+  /** Difficulty for a 1-based level: exponential decay toward humane-but-brutal floors. */
+  function levelParams(level) {
+    const n = level - 1;
+    const delayMin = Math.max(FLOOR.delayMin, BASE.delayMin * DECAY.delay ** n);
+    const delayMax = Math.max(FLOOR.delayMax, BASE.delayMax * DECAY.delay ** n);
+    const lifetime = Math.max(FLOOR.lifetime, BASE.lifetime * DECAY.lifetime ** n);
+    const size = Math.max(FLOOR.size, BASE.size * DECAY.size ** n);
     return {
-      count: 5 + stage,
-      delayMin: lerp(600, 180, t),
-      delayMax: lerp(1300, 450, t),
-      lifetime: lerp(1500, 700, t),
-      size: lerp(88, 54, t),
-      multiplier: 1 + stage * 0.25,
+      delayMin,
+      delayMax,
+      lifetime,
+      size,
+      multiplier: 1 + n * 0.2,
+      // How much faster one appear→expire cycle is compared with level 1.
+      speed: BASE_CYCLE / (lifetime + (delayMin + delayMax) / 2),
     };
   }
 
-  /** Builds a brand-new random course: positions, gaps and lifetimes all differ every run. */
-  function generateCourse() {
-    const course = [];
-    let prev = null;
-    for (let stage = 0; stage < STAGES; stage++) {
-      const p = stageParams(stage);
-      for (let i = 0; i < p.count; i++) {
-        let pos;
-        let tries = 0;
-        do {
-          pos = { x: Math.random(), y: Math.random() };
-          tries++;
-        } while (prev && Math.hypot(pos.x - prev.x, pos.y - prev.y) < MIN_JUMP && tries < 50);
-        prev = pos;
-        course.push({
-          stage,
-          index: i,
-          count: p.count,
-          x: pos.x,
-          y: pos.y,
-          delay: Math.round(rand(p.delayMin, p.delayMax)),
-          lifetime: Math.round(p.lifetime * rand(0.9, 1.1)),
-          size: Math.round(p.size * rand(0.92, 1.08)),
-          multiplier: p.multiplier,
-        });
-      }
+  /** Builds a fresh random batch of targets for one level; `prev` keeps jumps big across levels. */
+  function generateLevel(level, prev) {
+    const p = levelParams(level);
+    const count = randInt(4, 6);
+    const targets = [];
+    for (let i = 0; i < count; i++) {
+      let pos;
+      let tries = 0;
+      do {
+        pos = { x: Math.random(), y: Math.random() };
+        tries++;
+      } while (prev && Math.hypot(pos.x - prev.x, pos.y - prev.y) < MIN_JUMP && tries < 50);
+      prev = pos;
+      targets.push({
+        level,
+        index: i,
+        count,
+        x: pos.x,
+        y: pos.y,
+        delay: Math.round(rand(p.delayMin, p.delayMax)),
+        lifetime: Math.round(Math.max(FLOOR.lifetime, p.lifetime * rand(0.92, 1.08))),
+        size: Math.round(Math.max(FLOOR.size, p.size * rand(0.92, 1.08))),
+        multiplier: p.multiplier,
+      });
     }
-    return course;
+    return targets;
   }
 
   function hitPoints(rt, multiplier) {
     return Math.round(Math.max(50, 1000 - rt) * multiplier);
-  }
-
-  function missPenalty(multiplier) {
-    return Math.round(200 * multiplier);
   }
 
   function speedClass(ms) {
@@ -71,16 +77,14 @@
     return 'slow';
   }
 
-  function ratingFor(avg, accuracy) {
-    if (!isFinite(avg)) return 'No hits — give it another go';
-    let label;
-    if (avg < 250) label = 'Lightning reflexes ⚡';
-    else if (avg < 320) label = 'Razor sharp';
-    else if (avg < 400) label = 'Quick hands';
-    else if (avg < 520) label = 'Solid';
-    else label = 'Warming up';
-    if (accuracy < 70) label += ' · watch the misses';
-    return label;
+  function ratingFor(level, hits) {
+    if (!hits) return 'No hits — give it another go';
+    if (level >= 15) return 'Inhuman 🔥';
+    if (level >= 11) return 'Lightning reflexes ⚡';
+    if (level >= 8) return 'Razor sharp';
+    if (level >= 5) return 'Quick hands';
+    if (level >= 3) return 'Solid';
+    return 'Warming up';
   }
 
   const fmtMs = (ms) => `${Math.round(ms)} ms`;
@@ -118,15 +122,15 @@
       const data = JSON.parse(storageGet(STORAGE_KEY) || 'null');
       if (data && typeof data === 'object') {
         return {
+          level: Number.isFinite(data.level) ? data.level : null,
           score: Number.isFinite(data.score) ? data.score : null,
-          avg: Number.isFinite(data.avg) ? data.avg : null,
           runs: Number.isFinite(data.runs) ? data.runs : 0,
         };
       }
     } catch {
       /* corrupted entry — fall through to defaults */
     }
-    return { score: null, avg: null, runs: 0 };
+    return { level: null, score: null, runs: 0 };
   }
 
   function saveBest(best) {
@@ -178,6 +182,9 @@
     finish: () => {
       [660, 830, 990, 1320].forEach((f, i) => setTimeout(() => beep(f, 0.12, 'triangle', 0.1), i * 90));
     },
+    over: () => {
+      [440, 330, 220].forEach((f, i) => setTimeout(() => beep(f, 0.16, 'sawtooth', 0.07), i * 120));
+    },
   };
 
   function vibrate(ms) {
@@ -201,19 +208,19 @@
   };
 
   const el = {
+    bestLevel: $('best-level'),
     bestScore: $('best-score'),
-    bestAvg: $('best-avg'),
     btnPlay: $('btn-play'),
     btnSound: $('btn-sound'),
     btnReset: $('btn-reset'),
     btnQuit: $('btn-quit'),
     btnAgain: $('btn-again'),
     btnMenu: $('btn-menu'),
-    hudStage: $('hud-stage'),
-    hudTarget: $('hud-target'),
+    hudLevel: $('hud-level'),
+    hudSpeed: $('hud-speed'),
     hudLast: $('hud-last'),
-    hudMisses: $('hud-misses'),
-    hudMissesWrap: $('hud-misses-wrap'),
+    hudLives: $('hud-lives'),
+    hudLivesWrap: $('hud-lives-wrap'),
     hudTime: $('hud-time'),
     hudScore: $('hud-score'),
     progress: $('progress-bar'),
@@ -228,7 +235,10 @@
     stageSub: $('stage-sub'),
     newBest: $('new-best'),
     endTitle: $('end-title'),
+    endLevel: $('end-level'),
+    endLevelWrap: $('end-level-wrap'),
     endScore: $('end-score'),
+    endScoreWrap: $('end-score-wrap'),
     endRating: $('end-rating'),
     endTotal: $('end-total'),
     endAvg: $('end-avg'),
@@ -254,10 +264,12 @@
 
   // ---------- Game state ----------
 
-  // 'menu' | 'countdown' | 'banner' | 'waiting' | 'target' | 'over'
+  // 'menu' | 'countdown' | 'banner' | 'waiting' | 'target' | 'dying' | 'over'
   let state = 'menu';
-  let course = [];
-  let cursor = 0;
+  let level = 1;
+  let levelTargets = []; // the current level's random batch
+  let cursor = 0; // index into levelTargets
+  let lives = LIVES;
   let current = null; // { cx, cy, r, def }
   let appearAt = 0;
   let runStart = 0;
@@ -271,17 +283,22 @@
 
   function newStats() {
     return {
-      taps: [], // { rt, stage } for hits, { miss: kind, stage } for misses
+      taps: [], // { rt, level } for hits, { miss: kind, level } for misses
       reactions: [],
       missEmpty: 0,
       missEarly: 0,
       missTimeout: 0,
       score: 0,
-      perStage: Array.from({ length: STAGES }, () => ({ reactions: [], misses: 0 })),
+      perLevel: [], // index level-1 → { reactions: [], misses: 0 }
     };
   }
 
   const totalMisses = () => stats.missEmpty + stats.missEarly + stats.missTimeout;
+
+  function levelStats(lv) {
+    while (stats.perLevel.length < lv) stats.perLevel.push({ reactions: [], misses: 0 });
+    return stats.perLevel[lv - 1];
+  }
 
   function clearTimers() {
     clearTimeout(stepTimer);
@@ -305,10 +322,13 @@
   function startGame() {
     clearTimers();
     ensureAudio();
-    course = generateCourse();
+    level = 1;
+    levelTargets = generateLevel(level, null);
     cursor = 0;
+    lives = LIVES;
     current = null;
     stats = newStats();
+    levelStats(level);
     runStart = 0;
     runEnd = 0;
     resetArena();
@@ -338,7 +358,7 @@
       retrigger(el.countdownNum, 'pop');
       if (steps[i] === 'GO') sfx.go();
       else sfx.tick();
-      stepTimer = setTimeout(step, steps[i] === 'GO' ? 380 : 620);
+      stepTimer = setTimeout(step, steps[i] === 'GO' ? 300 : 480);
       i++;
     };
     step();
@@ -353,11 +373,11 @@
     rafId = requestAnimationFrame(tick);
   }
 
-  function showStageBanner(stage) {
+  function showLevelBanner() {
     state = 'banner';
-    const p = stageParams(stage);
-    el.stageTitle.textContent = `Stage ${stage + 1}`;
-    el.stageSub.textContent = stage === STAGES - 1 ? `Final stage · ${p.count} targets` : `Faster · ${p.count} targets`;
+    const p = levelParams(level);
+    el.stageTitle.textContent = `Level ${level}`;
+    el.stageSub.textContent = `${p.speed.toFixed(1)}× speed · ${levelTargets.length} targets`;
     el.stageOverlay.hidden = false;
     retrigger(el.stageTitle, 'pop');
     sfx.stage();
@@ -370,11 +390,11 @@
   function scheduleNext() {
     state = 'waiting';
     updateHud();
-    stepTimer = setTimeout(showTarget, course[cursor].delay);
+    stepTimer = setTimeout(showTarget, levelTargets[cursor].delay);
   }
 
   function showTarget() {
-    const def = course[cursor];
+    const def = levelTargets[cursor];
     const w = el.arena.clientWidth;
     const h = el.arena.clientHeight;
     const size = Math.min(def.size, Math.min(w, h) / 3.5);
@@ -426,8 +446,8 @@
 
     const cls = speedClass(rt);
     stats.reactions.push(rt);
-    stats.taps.push({ rt, stage: def.stage });
-    stats.perStage[def.stage].reactions.push(rt);
+    stats.taps.push({ rt, level: def.level });
+    levelStats(def.level).reactions.push(rt);
     stats.score += hitPoints(rt, def.multiplier);
 
     spawnFx('fx-ripple', cx, cy, { size: r * 2 });
@@ -442,50 +462,66 @@
     advance();
   }
 
-  function onMiss(kind, x, y, label) {
-    const stage = course[cursor].stage;
+  /** Records a miss and takes a life. Returns true if that was the last life. */
+  function registerMiss(kind) {
     stats[kind]++;
-    stats.taps.push({ miss: kind, stage });
-    stats.perStage[stage].misses++;
-    stats.score = Math.max(0, stats.score - missPenalty(course[cursor].multiplier));
-
-    spawnFx('fx-cross', x, y);
-    spawnFx('fx-label miss', x, y - 24, { text: label });
+    stats.taps.push({ miss: kind, level });
+    levelStats(level).misses++;
+    lives = Math.max(0, lives - 1);
     flashMiss();
     updateHud();
+    if (lives === 0) {
+      die();
+      return true;
+    }
+    return false;
+  }
+
+  function onMiss(kind, x, y, label) {
+    spawnFx('fx-cross', x, y);
+    spawnFx('fx-label miss', x, y - 24, { text: label });
+    // An off-target tap leaves the target up, so it can still be hit with the lives left.
+    registerMiss(kind);
   }
 
   function onTimeout() {
     if (state !== 'target') return;
-    const { cx, cy, r, def } = current;
+    const { cx, cy, r } = current;
     hideTarget();
-    stats.missTimeout++;
-    stats.taps.push({ miss: 'missTimeout', stage: def.stage });
-    stats.perStage[def.stage].misses++;
-    stats.score = Math.max(0, stats.score - missPenalty(def.multiplier));
-
     spawnFx('fx-expire', cx, cy, { size: r * 2 });
     spawnFx('fx-label miss', cx, cy, { text: 'TOO SLOW' });
-    flashMiss();
-    advance();
+    if (!registerMiss('missTimeout')) advance();
   }
 
   function flashMiss() {
     retrigger(el.flash, 'miss');
     el.flash.classList.remove('hit');
-    retrigger(el.hudMissesWrap, 'bump');
+    retrigger(el.hudLivesWrap, 'bump');
     sfx.miss();
     vibrate(35);
+  }
+
+  function die() {
+    runEnd = performance.now();
+    clearTimers();
+    hideTarget();
+    current = null;
+    state = 'dying';
+    el.hudTime.textContent = ((runEnd - runStart) / 1000).toFixed(2);
+    stepTimer = setTimeout(finish, DEATH_PAUSE_MS);
   }
 
   function advance() {
     current = null;
     cursor++;
-    updateHud();
-    if (cursor >= course.length) {
-      finish();
-    } else if (course[cursor].stage !== course[cursor - 1].stage) {
-      showStageBanner(course[cursor].stage);
+    if (cursor >= levelTargets.length) {
+      const last = levelTargets[levelTargets.length - 1];
+      level++;
+      levelTargets = generateLevel(level, last);
+      cursor = 0;
+      levelStats(level);
+      updateHud();
+      showLevelBanner();
     } else {
       scheduleNext();
     }
@@ -505,22 +541,26 @@
   }
 
   function updateHud() {
-    if (!stats || !course.length) return;
-    const def = course[Math.min(cursor, course.length - 1)];
-    const done = cursor >= course.length;
-    el.hudStage.textContent = `${def.stage + 1}/${STAGES}`;
-    el.hudTarget.textContent = `${done ? def.count : def.index + 1}/${def.count}`;
-    el.hudMisses.textContent = String(totalMisses());
+    if (!stats || !levelTargets.length) return;
+    el.hudLevel.textContent = String(level);
+    el.hudSpeed.textContent = `${levelParams(level).speed.toFixed(1)}×`;
+    el.hudLives.replaceChildren(
+      ...Array.from({ length: LIVES }, (_, i) => {
+        const heart = document.createElement('span');
+        heart.className = i < lives ? 'heart' : 'heart lost';
+        heart.textContent = '♥';
+        return heart;
+      })
+    );
+    el.hudLives.setAttribute('aria-label', `${lives} of ${LIVES} lives left`);
     el.hudScore.textContent = fmtInt(stats.score);
-    el.progress.style.width = `${(cursor / course.length) * 100}%`;
+    el.progress.style.width = `${(cursor / levelTargets.length) * 100}%`;
   }
 
   function finish() {
-    runEnd = performance.now();
     state = 'over';
     clearTimers();
     resetArena();
-    sfx.finish();
 
     const hits = stats.reactions.length;
     const misses = totalMisses();
@@ -532,39 +572,44 @@
     const score = stats.score;
 
     const best = loadBest();
+    const isBestLevel = hits > 0 && (best.level === null || level > best.level);
     const isBestScore = hits > 0 && (best.score === null || score > best.score);
-    const isBestAvg = hits > 0 && (best.avg === null || avg < best.avg);
     const updated = {
+      level: isBestLevel ? level : best.level,
       score: isBestScore ? score : best.score,
-      avg: isBestAvg ? Math.round(avg) : best.avg,
       runs: best.runs + 1,
     };
     saveBest(updated);
     renderBest(updated);
 
-    el.endTitle.textContent = accuracy >= 90 && hits > 0 ? 'Clean run!' : 'Course complete';
+    if (isBestLevel || isBestScore || level >= 10) sfx.finish();
+    else sfx.over();
+
+    el.endTitle.textContent = level >= 15 ? 'Unstoppable!' : level >= 10 ? 'Huge run!' : 'Game over';
+    el.endLevel.textContent = String(level);
     el.endScore.textContent = fmtInt(score);
-    el.endRating.textContent = ratingFor(avg, accuracy);
-    el.newBest.hidden = !(isBestScore || isBestAvg);
-    el.newBest.textContent = isBestScore && isBestAvg ? 'New best score & avg!' : isBestScore ? 'New best score!' : 'New best avg!';
+    el.endLevelWrap.classList.toggle('is-best', isBestLevel);
+    el.endScoreWrap.classList.toggle('is-best', isBestScore);
+    el.endRating.textContent = `${ratingFor(level, hits)} · ${levelParams(level).speed.toFixed(1)}× speed`;
+    el.newBest.hidden = !(isBestLevel || isBestScore);
+    el.newBest.textContent =
+      isBestLevel && isBestScore ? 'New best level & score!' : isBestLevel ? 'New best level!' : 'New best score!';
 
     el.endTotal.textContent = fmtSec(total);
     el.endAvg.textContent = hits ? fmtMs(avg) : '—';
     el.endFastest.textContent = hits ? fmtMs(fastest) : '—';
     el.endHits.textContent = String(hits);
     el.endMisses.textContent = String(misses);
-    el.endMissBreakdown.textContent = misses
-      ? `${stats.missEmpty} off-target · ${stats.missEarly} early · ${stats.missTimeout} slow`
-      : 'Flawless';
+    el.endMissBreakdown.textContent = `${stats.missEmpty} off-target · ${stats.missEarly} early · ${stats.missTimeout} slow`;
     el.endAccuracy.textContent = `${accuracy.toFixed(1)}%`;
 
     el.endStages.replaceChildren(
-      ...stats.perStage.map((s, i) => {
+      ...stats.perLevel.map((s, i) => {
         const cell = document.createElement('div');
         cell.className = 'stage-cell';
         const sAvg = s.reactions.length ? s.reactions.reduce((a, b) => a + b, 0) / s.reactions.length : NaN;
         cell.innerHTML = `
-          <span class="s-name">S${i + 1}</span>
+          <span class="s-name">L${i + 1}</span>
           <span class="s-avg">${isFinite(sAvg) ? Math.round(sAvg) : '—'}</span>
           <span class="s-miss${s.misses ? ' has' : ''}">${s.misses} miss${s.misses === 1 ? '' : 'es'}</span>`;
         return cell;
@@ -581,7 +626,7 @@
           chip.className = `chip ${speedClass(tap.rt)}`;
           chip.textContent = Math.round(tap.rt);
         }
-        chip.title = `Stage ${tap.stage + 1}`;
+        chip.title = `Level ${tap.level}`;
         return chip;
       })
     );
@@ -603,8 +648,8 @@
   // ---------- Menu ----------
 
   function renderBest(best) {
+    el.bestLevel.textContent = best.level === null ? '—' : `Level ${best.level}`;
     el.bestScore.textContent = best.score === null ? '—' : fmtInt(best.score);
-    el.bestAvg.textContent = best.avg === null ? '—' : fmtMs(best.avg);
   }
 
   function renderSound() {
@@ -633,7 +678,7 @@
   });
 
   el.btnReset.addEventListener('click', () => {
-    if (window.confirm('Reset your best score and best average?')) {
+    if (window.confirm('Reset your best level and best score?')) {
       storageRemove(STORAGE_KEY);
       renderBest(loadBest());
     }

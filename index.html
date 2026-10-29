@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0a0c13" />
-  <meta name="description" content="Reflex Run — a fast-paced reaction-time trainer. Tap targets in a randomly generated course that speeds up every stage." />
+  <meta name="description" content="Reflex Run — a fast-paced reaction-time trainer. Endless levels of randomly placed targets that get faster and smaller every level. Three lives." />
   <title>Reflex Run — Reaction Time Trainer</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%230a0c13' stroke='%235eead4' stroke-width='6'/%3E%3Ccircle cx='32' cy='32' r='12' fill='%235eead4'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="style.css" />
@@ -17,18 +17,18 @@
         <div class="logo"><span class="logo-dot"></span>REFLEX RUN</div>
         <h1 id="start-title">How fast are your hands?</h1>
         <p class="sub">
-          Tap each target the instant it appears. Five stages, a fresh random course every run —
-          and it gets faster as you go.
+          Tap each target the instant it appears. Endless levels, three lives — every level is
+          faster, tighter and smaller than the last.
         </p>
 
         <div class="best-grid">
           <div class="stat">
-            <span class="stat-label">Best score</span>
-            <span class="stat-value" id="best-score">—</span>
+            <span class="stat-label">Best level</span>
+            <span class="stat-value" id="best-level">—</span>
           </div>
           <div class="stat">
-            <span class="stat-label">Best avg reaction</span>
-            <span class="stat-value" id="best-avg">—</span>
+            <span class="stat-label">Best score</span>
+            <span class="stat-value" id="best-score">—</span>
           </div>
         </div>
 
@@ -38,6 +38,7 @@
           <li><span class="rule-dot hit"></span>Tap the glowing target before its ring closes.</li>
           <li><span class="rule-dot miss"></span>Tapping empty space or tapping too early is a miss.</li>
           <li><span class="rule-dot slow"></span>Let a target expire and it counts as a miss too.</li>
+          <li><span class="rule-dot life"></span>Every miss costs one of your 3 lives. Lose them all and the run ends.</li>
         </ul>
 
         <div class="row small-row">
@@ -51,28 +52,28 @@
     <section id="screen-game" class="screen" aria-label="Game">
       <header class="hud">
         <div class="hud-item">
-          <span class="hud-label">Stage</span>
-          <span class="hud-value" id="hud-stage">1/5</span>
+          <span class="hud-label">Level</span>
+          <span class="hud-value accent" id="hud-level">1</span>
         </div>
         <div class="hud-item">
-          <span class="hud-label">Target</span>
-          <span class="hud-value" id="hud-target">0/0</span>
+          <span class="hud-label">Speed</span>
+          <span class="hud-value" id="hud-speed">1.0×</span>
+        </div>
+        <div class="hud-item" id="hud-lives-wrap">
+          <span class="hud-label">Lives</span>
+          <span class="hud-value lives" id="hud-lives" role="img" aria-label="3 of 3 lives left"></span>
         </div>
         <div class="hud-item">
           <span class="hud-label">Last</span>
           <span class="hud-value" id="hud-last">—</span>
         </div>
-        <div class="hud-item" id="hud-misses-wrap">
-          <span class="hud-label">Misses</span>
-          <span class="hud-value" id="hud-misses">0</span>
+        <div class="hud-item">
+          <span class="hud-label">Score</span>
+          <span class="hud-value" id="hud-score">0</span>
         </div>
         <div class="hud-item">
           <span class="hud-label">Time</span>
           <span class="hud-value mono" id="hud-time">0.00</span>
-        </div>
-        <div class="hud-item hide-xs">
-          <span class="hud-label">Score</span>
-          <span class="hud-value" id="hud-score">0</span>
         </div>
         <button id="btn-quit" class="btn-quit" type="button" aria-label="Quit to menu" title="Quit (Esc)">&times;</button>
         <div class="progress" aria-hidden="true"><div class="progress-bar" id="progress-bar"></div></div>
@@ -89,7 +90,7 @@
         </div>
 
         <div id="overlay-stage" class="overlay" hidden>
-          <span id="stage-title" class="stage-title">Stage 2</span>
+          <span id="stage-title" class="stage-title">Level 2</span>
           <span id="stage-sub" class="overlay-sub">Faster</span>
         </div>
       </div>
@@ -99,13 +100,21 @@
     <section id="screen-end" class="screen" aria-labelledby="end-title">
       <div class="card wide">
         <div class="end-head">
-          <h2 id="end-title">Course complete</h2>
+          <h2 id="end-title">Game over</h2>
           <span id="new-best" class="badge" hidden>New best!</span>
         </div>
 
         <div class="score-big">
-          <span class="stat-label">Score</span>
-          <span id="end-score" class="score-value">0</span>
+          <div class="score-pair">
+            <div class="score-block" id="end-level-wrap">
+              <span class="stat-label">Level reached</span>
+              <span id="end-level" class="score-value">1</span>
+            </div>
+            <div class="score-block" id="end-score-wrap">
+              <span class="stat-label">Score</span>
+              <span id="end-score" class="score-value">0</span>
+            </div>
+          </div>
           <span id="end-rating" class="rating"></span>
         </div>
 
@@ -137,7 +146,7 @@
           </div>
         </div>
 
-        <h3 class="section-title">Per stage</h3>
+        <h3 class="section-title">Avg ms per level</h3>
         <div id="end-stages" class="stage-table"></div>
 
         <h3 class="section-title">Every tap <span class="legend">
